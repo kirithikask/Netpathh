@@ -1,0 +1,51 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: netpath-test
+
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  flyway:
+    enabled: false
+
+app:
+  demo-data:
+    enabled: false
+  security:
+    jwt:
+      secret: test-jwt-secret-key-for-testing-purposes-only-12345
+      expiration-ms: 86400000
+  path-health:
+    thresholds:
+      degraded-latency-ms: 100
+      down-latency-ms: 500
+      degraded-packet-loss-pct: 0.5
+      down-packet-loss-pct: 10.0
+      min-metrics-for-evaluation: 3
+    cache:
+      ttl-seconds: 60
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
