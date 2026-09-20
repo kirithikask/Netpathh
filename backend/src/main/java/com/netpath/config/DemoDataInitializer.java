@@ -7,7 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -21,10 +21,15 @@ import java.util.Random;
 /**
  * Seeds a small but realistic network so the platform is demonstrable on first run.
  *
- * <p>Only runs when the database has no users, so it never overwrites real data. Disable with
- * {@code app.demo-data.enabled=false}.
+ * <p>Only runs when the database has no users, so it never overwrites real data, and it is off
+ * unless {@code app.demo-data.enabled=true}. Only the {@code dev} profile switches it on; a
+ * production database is provisioned by {@link BootstrapAdminInitializer} instead, which creates an
+ * operator and no fabricated estate.
+ *
+ * <p>Runs before the bootstrap admin so a seeded environment does not end up with two operators.
  */
 @Component
+@Order(1)
 public class DemoDataInitializer implements ApplicationRunner {
 
     private static final Logger logger = LoggerFactory.getLogger(DemoDataInitializer.class);

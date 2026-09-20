@@ -7,7 +7,8 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.demo-data")
 public class DemoDataProperties {
 
-    private boolean enabled = true;
+    /** Off unless configuration turns it on, so losing the property cannot seed a real database. */
+    private boolean enabled = false;
     private String email = "operator@netpath.io";
     private String password = "netpath123";
 
