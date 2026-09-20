@@ -1,0 +1,20 @@
+# Build output
+backend/target/
+frontend/dist/
+frontend/node_modules/
+*.tsbuildinfo
+
+# Local demo database (created by the `dev` profile)
+backend/data/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

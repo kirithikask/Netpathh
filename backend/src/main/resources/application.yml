@@ -1,0 +1,71 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: netpath
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/netpath
+    username: netpath
+    password: netpath
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  jackson:
+    # Nulls are serialized deliberately: the console's TypeScript types describe every field, and
+    # omitted keys would force every consumer to treat "absent" and "null" as different states.
+    serialization:
+      write-dates-as-timestamps: false
+
+app:
+  demo-data:
+    enabled: true
+    email: operator@netpath.io
+    password: netpath123
+  security:
+    jwt:
+      secret: netpath-jwt-secret-key-2024-very-secret-key-for-development-only
+      expiration-ms: 86400000
+  path-health:
+    thresholds:
+      # DEGRADED at or above the "degraded" boundary, DOWN at or above the "down" boundary.
+      degraded-latency-ms: 100
+      down-latency-ms: 500
+      degraded-packet-loss-pct: 0.5
+      down-packet-loss-pct: 10.0
+      min-metrics-for-evaluation: 3
+    cache:
+      ttl-seconds: 120
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    root: INFO
+    com.netpath: DEBUG
