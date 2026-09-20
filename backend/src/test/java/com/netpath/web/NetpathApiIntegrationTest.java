@@ -20,6 +20,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -128,6 +130,28 @@ class NetpathApiIntegrationTest {
         return objectMapper.readTree(body).get("token").asText();
     }
 
+    private Long pathIdNamed(String pathName) {
+        return networkPathRepository.findAll().stream()
+                .filter(path -> pathName.equals(path.getPathName()))
+                .findFirst().orElseThrow().getId();
+    }
+
+    /**
+     * Writes telemetry directly so a timestamp can be placed in the past. The API always stamps the
+     * current instant, which is exactly the state these window tests need to step outside of.
+     */
+    private void storeMetricsAgedBy(Long pathId, int samples, int hoursAgo, int latencyMs, String packetLoss) {
+        NetworkPath path = networkPathRepository.findById(pathId).orElseThrow();
+        Instant start = Instant.now().minus(hoursAgo, ChronoUnit.HOURS);
+
+        for (int i = 0; i < samples; i++) {
+            PathMetric metric = new PathMetric(
+                    path, latencyMs, new BigDecimal(packetLoss), new BigDecimal("500.00"));
+            metric.setTimestamp(start.plus(i, ChronoUnit.MINUTES));
+            pathMetricRepository.save(metric);
+        }
+    }
+
     private void sendMetric(Long pathId, int latencyMs, String packetLoss) throws Exception {
         TelemetryRequest request = new TelemetryRequest(
                 latencyMs, new BigDecimal(packetLoss), new BigDecimal("500.00"));
@@ -174,6 +198,50 @@ class NetpathApiIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UNKNOWN"));
+    }
+
+    /**
+     * Current health is computed over a recent window, so telemetry that has aged out stops
+     * deciding the verdict. Without that, a bad hour last month would hold a recovered path
+     * DEGRADED - or a dead path "healthy" - forever.
+     */
+    @Test
+    void telemetryOlderThanTheHealthWindowNoLongerDecidesTheCurrentStatus() throws Exception {
+        Long backupId = pathIdNamed("backup-link");
+        storeMetricsAgedBy(backupId, 5, 2, 900, "20.00");
+
+        mockMvc.perform(get("/api/paths/{id}/health", backupId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNKNOWN"))
+                // Zero samples inside the window is the mechanism, so assert it directly.
+                .andExpect(jsonPath("$.metricsCount").value(0));
+
+        // The samples are still stored: history is retained, it just is not current health.
+        assertThat(pathMetricRepository.findByPathIdOrderByTimestampDesc(
+                backupId, PageRequest.of(0, 10)).getTotalElements()).isEqualTo(5);
+    }
+
+    /**
+     * The counterpart: ancient samples are ignored while recent ones still classify the path, even
+     * when the two would disagree.
+     */
+    @Test
+    void onlySamplesInsideTheHealthWindowFeedTheClassification() throws Exception {
+        Long backupId = pathIdNamed("backup-link");
+
+        // Four catastrophic samples from two hours ago, then three healthy ones now.
+        storeMetricsAgedBy(backupId, 4, 2, 900, "20.00");
+        sendMetric(backupId, 44, "0.10");
+        sendMetric(backupId, 46, "0.12");
+        sendMetric(backupId, 42, "0.08");
+
+        // Averaging all seven would put latency near 530 ms, which is DOWN.
+        mockMvc.perform(get("/api/paths/{id}/health", backupId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("HEALTHY"))
+                .andExpect(jsonPath("$.metricsCount").value(3));
     }
 
     @Test
@@ -224,6 +292,34 @@ class NetpathApiIntegrationTest {
                 .andExpect(jsonPath("$.recommendedStatus").value("HEALTHY"))
                 .andExpect(jsonPath("$.hasAlternative").value(true))
                 .andExpect(jsonPath("$.reason").isNotEmpty());
+    }
+
+    /**
+     * Recommendation evaluation is a pure read. A dashboard polling it, an operator refreshing it, or
+     * a crawler hitting it must all leave the database byte-for-byte as it was.
+     */
+    @Test
+    void evaluatingARecommendationRepeatedlyWritesNoRows() throws Exception {
+        Map<String, Long> before = rowCounts();
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            mockMvc.perform(get("/api/paths/{id}/recommendation", degradedPathId)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.recommendedPathId").value(healthyAlternativeId));
+        }
+
+        assertThat(rowCounts()).isEqualTo(before);
+    }
+
+    private Map<String, Long> rowCounts() {
+        return Map.of(
+                "applications", applicationRepository.count(),
+                "endpoints", endpointRepository.count(),
+                "network_paths", networkPathRepository.count(),
+                "path_metrics", pathMetricRepository.count(),
+                "traffic_shift_logs", trafficShiftLogRepository.count(),
+                "users", userRepository.count());
     }
 
     @Test
@@ -553,15 +649,11 @@ class NetpathApiIntegrationTest {
     }
 
     /**
-     * A path the console has looked at is named by a stored recommendation, and a path that has been
-     * shifted to is named by a shift log. Neither may block its deletion.
+     * A path that has been shifted away from is named by a shift log, which may not block its
+     * deletion.
      */
     @Test
-    void deletingAPathSurvivesTheRecommendationsAndShiftLogsThatMentionIt() throws Exception {
-        mockMvc.perform(get("/api/paths/{id}/recommendation", degradedPathId)
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk());
-
+    void deletingAPathSurvivesTheShiftLogsThatMentionIt() throws Exception {
         TrafficShiftRequest request = new TrafficShiftRequest("Drain the alternative before maintenance");
         request.setRecommendedPathId(healthyAlternativeId);
 

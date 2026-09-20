@@ -142,6 +142,7 @@ export interface PathHealthConfig {
   degradedPacketLossPct: number;
   downPacketLossPct: number;
   minMetricsForEvaluation: number;
+  windowMinutes: number;
   cacheTtlSeconds: number;
 }
 

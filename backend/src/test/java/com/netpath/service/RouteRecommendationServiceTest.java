@@ -5,13 +5,10 @@ import com.netpath.dto.RouteRecommendationDto;
 import com.netpath.entity.Endpoint;
 import com.netpath.entity.NetworkPath;
 import com.netpath.entity.PathStatus;
-import com.netpath.entity.RouteRecommendation;
 import com.netpath.repository.NetworkPathRepository;
 import com.netpath.repository.PathMetricRepository;
-import com.netpath.repository.RouteRecommendationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -36,7 +33,6 @@ class RouteRecommendationServiceTest {
     private static final long WORSE_ALT_ID = 3L;
 
     private NetworkPathRepository networkPathRepository;
-    private RouteRecommendationRepository recommendationRepository;
     private RouteRecommendationService service;
 
     /** Telemetry rows keyed by path, served through the single aggregate query. */
@@ -45,10 +41,9 @@ class RouteRecommendationServiceTest {
     @BeforeEach
     void setUp() {
         networkPathRepository = mock(NetworkPathRepository.class);
-        recommendationRepository = mock(RouteRecommendationRepository.class);
 
         PathMetricRepository pathMetricRepository = mock(PathMetricRepository.class);
-        when(pathMetricRepository.summariseForPaths(anyCollection())).thenAnswer(invocation -> {
+        when(pathMetricRepository.summariseForPaths(anyCollection(), any())).thenAnswer(invocation -> {
             Collection<Long> ids = invocation.getArgument(0);
             return ids.stream().map(telemetry::get).filter(java.util.Objects::nonNull).toList();
         });
@@ -56,8 +51,7 @@ class RouteRecommendationServiceTest {
         PathHealthService pathHealthService = new PathHealthService(
                 pathMetricRepository, networkPathRepository, new PathHealthProperties());
 
-        service = new RouteRecommendationService(
-                networkPathRepository, recommendationRepository, pathHealthService);
+        service = new RouteRecommendationService(networkPathRepository, pathHealthService);
     }
 
     private NetworkPath path(long id, String name, Endpoint source, Endpoint destination) {
@@ -99,10 +93,37 @@ class RouteRecommendationServiceTest {
         assertThat(recommendation.getRecommendedPathId()).isEqualTo(HEALTHY_ALT_ID);
         assertThat(recommendation.getRecommendedStatus()).isEqualTo(PathStatus.HEALTHY.name());
         assertThat(recommendation.getReason()).contains("DEGRADED").contains("Latency");
+    }
 
-        ArgumentCaptor<RouteRecommendation> captor = ArgumentCaptor.forClass(RouteRecommendation.class);
-        verify(recommendationRepository).save(captor.capture());
-        assertThat(captor.getValue().getRecommendedPath().getId()).isEqualTo(HEALTHY_ALT_ID);
+    /**
+     * The endpoint is a GET, so evaluating it must not write anything - not a recommendation row and
+     * not a timestamp touch on the path. Nothing in the repository may be saved by a read.
+     */
+    @Test
+    void evaluatingARecommendationWritesNothing() {
+        Endpoint source = endpoint(10L, "edge-a", "10.0.0.1");
+        Endpoint destination = endpoint(20L, "edge-b", "10.0.0.2");
+
+        NetworkPath current = path(CURRENT_PATH_ID, "primary", source, destination);
+        NetworkPath healthy = path(HEALTHY_ALT_ID, "alternative", source, destination);
+
+        when(networkPathRepository.findByIdWithDetails(CURRENT_PATH_ID)).thenReturn(Optional.of(current));
+        when(networkPathRepository.findAlternativePaths(10L, 20L, CURRENT_PATH_ID))
+                .thenReturn(List.of(healthy));
+
+        telemetryFor(CURRENT_PATH_ID, 10, 300.0, 5.0);
+        telemetryFor(HEALTHY_ALT_ID, 10, 78.0, 0.20);
+
+        // The telemetry above classifies this path DEGRADED, which is what a persisting read would
+        // have written. The entity still carries its untouched default, so nothing was stored.
+        assertThat(service.generateRecommendation(CURRENT_PATH_ID).getCurrentStatus())
+                .isEqualTo(PathStatus.DEGRADED.name());
+        service.generateRecommendation(CURRENT_PATH_ID);
+
+        assertThat(current.getStatus()).isEqualTo(PathStatus.UNKNOWN);
+        verify(networkPathRepository, never()).save(any());
+        verify(networkPathRepository, never()).saveAll(any());
+        verify(networkPathRepository, never()).delete(any());
     }
 
     @Test
@@ -146,7 +167,6 @@ class RouteRecommendationServiceTest {
         assertThat(recommendation.getHasAlternative()).isFalse();
         assertThat(recommendation.getRecommendedPathId()).isNull();
         assertThat(recommendation.getReason()).contains("No alternative path");
-        verify(recommendationRepository, never()).save(any());
     }
 
     @Test

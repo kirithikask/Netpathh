@@ -14,7 +14,7 @@ function explain(health: PathHealthDto, config: PathHealthConfig): string[] {
 
   if (health.status === 'UNKNOWN') {
     reasons.push(
-      `Only ${health.metricsCount} of ${config.minMetricsForEvaluation} required samples have been ingested, so the path cannot be classified yet.`,
+      `Only ${health.metricsCount} of ${config.minMetricsForEvaluation} required samples arrived in the last ${config.windowMinutes} minutes, so the path cannot be classified yet.`,
     );
     return reasons;
   }
@@ -91,6 +91,10 @@ export function HealthAnalysis({ health, config }: Props) {
             <tr>
               <td className="faint tiny">Minimum samples before classifying</td>
               <td className="right mono tiny">{config.minMetricsForEvaluation}</td>
+            </tr>
+            <tr>
+              <td className="faint tiny">Telemetry window for current health</td>
+              <td className="right mono tiny">{config.windowMinutes} min</td>
             </tr>
             <tr>
               <td className="faint tiny">Redis hot-state TTL</td>

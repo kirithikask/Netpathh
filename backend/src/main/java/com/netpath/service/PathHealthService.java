@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
@@ -26,6 +27,11 @@ import java.util.Map;
  * <p>It knows nothing about Redis or HTTP. Callers that need cached reads go through
  * {@link PathHealthCacheService}; callers that need the stored projection call
  * {@link #evaluateAndPersistStatus(NetworkPath)} after telemetry arrives.
+ *
+ * <p>Current health is computed from the samples inside {@code app.path-health.window-minutes},
+ * not from the whole telemetry table. Telemetry stays persisted forever for history and charts;
+ * only the classification is windowed, so an old incident cannot hold a recovered path DEGRADED
+ * and a path that stopped reporting falls back to UNKNOWN instead of its last verdict.
  */
 @Service
 public class PathHealthService {
@@ -93,11 +99,20 @@ public class PathHealthService {
             return summaries;
         }
 
-        for (Object[] row : pathMetricRepository.summariseForPaths(pathIds)) {
+        Instant since = currentWindowStart();
+        for (Object[] row : pathMetricRepository.summariseForPaths(pathIds, since)) {
             PathTelemetrySummary summary = PathTelemetrySummary.fromRow(row);
             summaries.put(summary.pathId(), summary);
         }
         return summaries;
+    }
+
+    /**
+     * Start of the window current health is computed over. Paths with no samples after this point
+     * get no aggregate row at all, which is what makes them UNKNOWN.
+     */
+    public Instant currentWindowStart() {
+        return Instant.now().minus(Duration.ofMinutes(properties.getWindowMinutes()));
     }
 
     /** Read-only evaluation: used by the cache on a miss and by the recommendation engine. */

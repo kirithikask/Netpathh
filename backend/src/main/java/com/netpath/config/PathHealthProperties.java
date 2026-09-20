@@ -9,6 +9,10 @@ import org.springframework.stereotype.Component;
  * <p>A path is DEGRADED at or above the {@code degraded-*} boundary and DOWN at or above the
  * {@code down-*} boundary. There is no third "healthy ceiling" pair: with two outcomes above
  * HEALTHY, a middle threshold could never change a result, so it does not exist.
+ *
+ * <p>{@code window-minutes} bounds which samples those boundaries are applied to. Aggregating the
+ * whole telemetry table would let one bad hour from last month hold a now-healthy path DEGRADED
+ * indefinitely, and a path that stopped reporting would keep its last verdict forever.
  */
 @Component
 @ConfigurationProperties(prefix = "app.path-health")
@@ -16,6 +20,20 @@ public class PathHealthProperties {
 
     private Thresholds thresholds = new Thresholds();
     private Cache cache = new Cache();
+
+    /**
+     * How far back current health looks. Only samples newer than this describe the path as it is
+     * now; anything older is history and must not keep a path DEGRADED (or HEALTHY) forever.
+     */
+    private int windowMinutes = 60;
+
+    public int getWindowMinutes() {
+        return windowMinutes;
+    }
+
+    public void setWindowMinutes(int windowMinutes) {
+        this.windowMinutes = windowMinutes;
+    }
 
     public Thresholds getThresholds() {
         return thresholds;

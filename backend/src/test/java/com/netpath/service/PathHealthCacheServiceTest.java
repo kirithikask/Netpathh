@@ -56,7 +56,7 @@ class PathHealthCacheServiceTest {
 
     private void stubHealthyTelemetry() {
         Object[] row = { PATH_ID, 40.0, 0.1, 60.0, 0.4, 5L, Instant.now() };
-        when(pathMetricRepository.summariseForPaths(anyCollection())).thenReturn(List.<Object[]>of(row));
+        when(pathMetricRepository.summariseForPaths(anyCollection(), any())).thenReturn(List.<Object[]>of(row));
     }
 
     @Test
@@ -72,7 +72,7 @@ class PathHealthCacheServiceTest {
 
         assertThat(second.getStatus()).isEqualTo(PathStatus.HEALTHY.name());
         // The second read is served from the cache, so the aggregate query runs only once.
-        verify(pathMetricRepository, times(1)).summariseForPaths(anyCollection());
+        verify(pathMetricRepository, times(1)).summariseForPaths(anyCollection(), any());
         verify(networkPathRepository, times(1)).findById(PATH_ID);
     }
 
@@ -82,7 +82,7 @@ class PathHealthCacheServiceTest {
         when(redisTemplate.opsForValue()).thenThrow(new IllegalStateException("redis is down"));
 
         assertThat(service.get(PATH_ID).getStatus()).isEqualTo(PathStatus.HEALTHY.name());
-        verify(pathMetricRepository, times(1)).summariseForPaths(anyCollection());
+        verify(pathMetricRepository, times(1)).summariseForPaths(anyCollection(), any());
     }
 
     @Test

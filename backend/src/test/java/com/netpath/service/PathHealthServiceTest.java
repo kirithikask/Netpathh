@@ -7,11 +7,18 @@ import com.netpath.repository.NetworkPathRepository;
 import com.netpath.repository.PathMetricRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * The classification rule is pure, so these tests need no mocks and no database.
@@ -19,13 +26,15 @@ import static org.mockito.Mockito.mock;
 class PathHealthServiceTest {
 
     private PathHealthProperties properties;
+    private PathMetricRepository pathMetricRepository;
     private PathHealthService service;
 
     @BeforeEach
     void setUp() {
         properties = new PathHealthProperties();
+        pathMetricRepository = mock(PathMetricRepository.class);
         service = new PathHealthService(
-                mock(PathMetricRepository.class), mock(NetworkPathRepository.class), properties);
+                pathMetricRepository, mock(NetworkPathRepository.class), properties);
     }
 
     private PathTelemetrySummary summary(long samples, Double avgLatency, Double avgLoss,
@@ -100,5 +109,49 @@ class PathHealthServiceTest {
     @Test
     void doesNotThrowWhenAMetricIsAbsent() {
         assertThat(classify(5, null, null, null, null)).isEqualTo(PathStatus.HEALTHY);
+    }
+
+    // --- current-health window ------------------------------------------------------------------
+
+    /**
+     * The aggregate must be bounded by the configured window, otherwise every sample ever ingested
+     * is averaged into "now".
+     */
+    @Test
+    void aggregatesOnlySamplesInsideTheConfiguredWindow() {
+        properties.setWindowMinutes(30);
+        when(pathMetricRepository.summariseForPaths(anyCollection(), any())).thenReturn(List.of());
+
+        Instant before = Instant.now().minus(Duration.ofMinutes(30));
+        service.summarise(1L);
+        Instant after = Instant.now().minus(Duration.ofMinutes(30));
+
+        ArgumentCaptor<Instant> since = ArgumentCaptor.forClass(Instant.class);
+        verify(pathMetricRepository).summariseForPaths(anyCollection(), since.capture());
+
+        assertThat(since.getValue()).isBetween(before, after);
+    }
+
+    /**
+     * A path whose samples have all aged out produces no aggregate row, and must be reported as
+     * UNKNOWN rather than keeping its last verdict.
+     */
+    @Test
+    void aPathWithNoSamplesInsideTheWindowHasNoSummary() {
+        when(pathMetricRepository.summariseForPaths(anyCollection(), any())).thenReturn(List.of());
+
+        PathTelemetrySummary summary = service.summarise(1L);
+
+        assertThat(summary.pathId()).isEqualTo(1L);
+        assertThat(summary.sampleCount()).isZero();
+        assertThat(service.classify(summary)).isEqualTo(PathStatus.UNKNOWN);
+    }
+
+    @Test
+    void readingTheWindowStartUsesTheConfiguredMinutes() {
+        properties.setWindowMinutes(15);
+
+        Instant expected = Instant.now().minus(Duration.ofMinutes(15));
+        assertThat(Duration.between(expected, service.currentWindowStart())).isLessThan(Duration.ofSeconds(2));
     }
 }

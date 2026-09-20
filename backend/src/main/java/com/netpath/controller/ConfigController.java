@@ -32,6 +32,7 @@ public class ConfigController {
                 "degradedPacketLossPct", thresholds.getDegradedPacketLossPct(),
                 "downPacketLossPct", thresholds.getDownPacketLossPct(),
                 "minMetricsForEvaluation", thresholds.getMinMetricsForEvaluation(),
+                "windowMinutes", pathHealthProperties.getWindowMinutes(),
                 "cacheTtlSeconds", pathHealthProperties.getCache().getTtlSeconds()
         ));
     }

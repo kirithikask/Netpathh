@@ -5,9 +5,7 @@ import com.netpath.dto.RouteRecommendationDto;
 import com.netpath.entity.Endpoint;
 import com.netpath.entity.NetworkPath;
 import com.netpath.entity.PathStatus;
-import com.netpath.entity.RouteRecommendation;
 import com.netpath.repository.NetworkPathRepository;
-import com.netpath.repository.RouteRecommendationRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,6 +19,11 @@ import java.util.Optional;
  * Ranks the alternative paths configured between the same two endpoints and recommends one only when
  * it is measurably better than the path in use. The ranking rules are documented in
  * docs/route-recommendation.md.
+ *
+ * <p>Evaluation is a pure read: it compares the telemetry it already has and writes nothing. An
+ * operator opening a page, a dashboard polling, or a crawler hitting the endpoint therefore cannot
+ * change the database. The decision an operator actually takes is recorded by
+ * {@link TrafficShiftService} when the shift is simulated.
  */
 @Service
 public class RouteRecommendationService {
@@ -28,14 +31,11 @@ public class RouteRecommendationService {
     private static final Logger logger = LoggerFactory.getLogger(RouteRecommendationService.class);
 
     private final NetworkPathRepository networkPathRepository;
-    private final RouteRecommendationRepository recommendationRepository;
     private final PathHealthService pathHealthService;
 
     public RouteRecommendationService(NetworkPathRepository networkPathRepository,
-                                      RouteRecommendationRepository recommendationRepository,
                                       PathHealthService pathHealthService) {
         this.networkPathRepository = networkPathRepository;
-        this.recommendationRepository = recommendationRepository;
         this.pathHealthService = pathHealthService;
     }
 
@@ -86,8 +86,6 @@ public class RouteRecommendationService {
             recommendation.setRecommendedAvgPacketLossPct(bestHealth.getAveragePacketLossPct());
             recommendation.setReason(describeImprovement(currentHealth, bestHealth));
             recommendation.setHasAlternative(true);
-
-            persistRecommendation(currentPath, bestAlternative, source, destination, recommendation);
         } else {
             recommendation.setReason(alternatives.isEmpty()
                     ? "No alternative paths are configured between these endpoints"
@@ -195,23 +193,5 @@ public class RouteRecommendationService {
 
     private Double difference(Double current, Double alternative) {
         return current != null && alternative != null ? current - alternative : null;
-    }
-
-    private void persistRecommendation(NetworkPath currentPath, NetworkPath recommendedPath,
-                                       Endpoint source, Endpoint destination,
-                                       RouteRecommendationDto recommendation) {
-        try {
-            recommendationRepository.save(new RouteRecommendation(
-                    currentPath,
-                    recommendedPath,
-                    recommendation.getReason(),
-                    source.getId(),
-                    destination.getId(),
-                    PathStatus.valueOf(recommendation.getRecommendedStatus())));
-        } catch (RuntimeException e) {
-            // The audit trail is useful but must never fail an operator's read request.
-            logger.error("Failed to persist recommendation for path {}: {}",
-                    currentPath.getId(), e.getMessage());
-        }
     }
 }

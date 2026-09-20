@@ -33,9 +33,15 @@ public interface PathMetricRepository extends JpaRepository<PathMetric, Long> {
      * The only aggregate query in the application. Accepts a batch of paths so listing a page of
      * paths costs one round trip, and a single-element batch when health needs to be evaluated.
      * Rows are consumed by {@code PathTelemetrySummary.fromRow}.
+     *
+     * <p>{@code since} bounds the aggregation to the current-health window. A path with no recent
+     * samples simply produces no row, which the caller reads as UNKNOWN rather than as "still
+     * healthy". Historical samples stay in the table; they are just not current health.
      */
     @Query("SELECT pm.path.id, AVG(pm.latencyMs), AVG(pm.packetLossPct), MAX(pm.latencyMs), " +
            "MAX(pm.packetLossPct), COUNT(pm), MAX(pm.timestamp) " +
-           "FROM PathMetric pm WHERE pm.path.id IN :pathIds GROUP BY pm.path.id")
-    List<Object[]> summariseForPaths(@Param("pathIds") Collection<Long> pathIds);
+           "FROM PathMetric pm WHERE pm.path.id IN :pathIds AND pm.timestamp >= :since " +
+           "GROUP BY pm.path.id")
+    List<Object[]> summariseForPaths(@Param("pathIds") Collection<Long> pathIds,
+                                     @Param("since") Instant since);
 }
