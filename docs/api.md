@@ -81,12 +81,15 @@ Publishes the thresholds in force so clients can explain classifications without
   "degradedPacketLossPct": 0.5,
   "downPacketLossPct": 10.0,
   "minMetricsForEvaluation": 3,
+  "windowMinutes": 60,
   "cacheTtlSeconds": 120
 }
 ```
 
 A path is `DEGRADED` at or above a `degraded*` boundary and `DOWN` at or above a `down*` boundary;
-between them the classification is the more severe of the two metrics.
+between them the classification is the more severe of the two metrics. `windowMinutes` bounds which
+samples those boundaries are applied to: telemetry older than the window is retained for history but
+does not describe current health, so a path with no samples inside it is `UNKNOWN`.
 
 ### `GET /api/dashboard/stats`
 
@@ -164,8 +167,8 @@ aggregates.
 ```
 
 Deleting a path also removes its telemetry history and its Redis entry, and does not fail because
-recommendations or shift records mention it: those references are cleared, and the shift records
-themselves survive (a shift log outlives the paths it names).
+shift records mention it: those references are cleared, and the shift records themselves survive (a
+shift log outlives the paths it names).
 
 A path response carries the status plus the telemetry summary, so a list needs one page query and one
 grouped aggregate rather than a query per row:
@@ -269,6 +272,9 @@ Current classification, served from Redis when possible. Below
 
 Returns the ranked alternative, or `hasAlternative: false` with an explanation. See
 [route-recommendation.md](route-recommendation.md) for the ranking rules.
+
+Read-only: evaluating a recommendation writes nothing, so the endpoint is safe to poll. Repeated
+calls against the same telemetry return the same answer and leave every table unchanged.
 
 ### `POST /api/paths/{id}/shift`
 

@@ -27,15 +27,19 @@ React (Vite)  ──REST/JWT──►  Spring Boot  ──JPA──►  PostgreS
 ### Data stores
 
 **PostgreSQL** holds everything durable: `users`, `applications`, `endpoints`, `network_paths`,
-`path_metrics`, `route_recommendations`, `traffic_shift_logs`. Flyway (`V1__initial_schema.sql`) owns
-the schema; `ddl-auto` is `validate` outside the demo profile so drift fails fast at startup.
+`path_metrics`, `traffic_shift_logs`. Flyway owns the schema - `V1__initial_schema.sql` creates it,
+`V2` drops the never-written endpoint metric columns, and `V3` drops `route_recommendations` now that
+recommendation evaluation is a pure read. `ddl-auto` is `validate` outside the demo profile, so any
+drift between entities and migrations fails fast at startup instead of mutating a database.
 
 The demo profile instead lets Hibernate generate the schema, so any rule that lives only in a
 migration does not exist there. Foreign-key behaviour is therefore declared on the entities too
-(`@OnDelete` on the referencing associations): deleting a path cascades to its `path_metrics`,
-recommendations and shift records, and the nullable `recommended_path_id` / `old_path_id` /
-`new_path_id` references are cleared rather than blocking the delete. Adding a column or constraint
-to `V1__initial_schema.sql` means mirroring it in the mapping, or the demo profile will diverge.
+(`@OnDelete` on the referencing associations): deleting a path cascades to its `path_metrics` and
+shift records, and the nullable `recommended_path_id` / `old_path_id` / `new_path_id` references are
+cleared rather than blocking the delete. Adding a column or constraint to `V1__initial_schema.sql`
+means mirroring it in the mapping, or the demo profile will diverge. This divergence is the root
+cause of the cascade defects fixed earlier, and the reason the default profile now runs the real
+migrations.
 
 Deleting an endpoint takes the paths that ran through it, because a path cannot exist without both
 ends; deleting an application takes its endpoints and paths. Only the first of those is database
@@ -120,9 +124,12 @@ cache refresh happens after; a Redis failure is logged (throttled) and does not 
 
 ```
 resolve path → PathHealthService.evaluate → find alternative paths on the same endpoint pair
-             → evaluate each alternative → rank → persist the recommendation
-             → return current route, recommended route, and the reason
+             → evaluate each alternative → rank → return current route, recommended route, reason
 ```
+
+Nothing is written. The endpoint is a `GET`, so it is safe to poll, refresh or crawl; an integration
+test asserts row counts are identical across repeated calls. The decision an operator then takes is
+recorded by the shift endpoint, which is the only place an action is persisted.
 
 See [route-recommendation.md](route-recommendation.md).
 

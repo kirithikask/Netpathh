@@ -72,9 +72,15 @@ Two guards matter in practice:
 each metric that actually improved. If nothing improved measurably it says the metrics are
 comparable. The console renders this string verbatim.
 
-Each successful recommendation is also persisted to `route_recommendations` (current path,
-recommended path, reason, endpoint ids, recommended status, timestamp) so the history of what the
-platform advised is auditable. Persistence failure is logged and never fails the request.
+**Evaluating a recommendation writes nothing.** It is a `GET`, so a dashboard poll, an operator
+refresh or a crawler cannot mutate the database, and the same call always returns the same answer
+for the same telemetry. Earlier revisions persisted every evaluation to a `route_recommendations`
+table that nothing ever read back; that table and its write path were removed in `V3`.
+
+The history worth keeping is what the operator decided, not what the platform suggested: that is
+recorded by `POST /api/paths/{id}/shift` in `traffic_shift_logs`, including the reason the operator
+confirmed. An integration test pins the read-only contract by comparing row counts across every
+table before and after repeated calls.
 
 ## Complexity and cost
 

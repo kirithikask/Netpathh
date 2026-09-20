@@ -96,6 +96,8 @@ cd backend
 mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
+The `dev` profile supplies its own development signing key, so no environment variables are needed.
+
 ```bash
 cd frontend
 npm install
@@ -118,9 +120,28 @@ docker compose -f infrastructure/docker-compose.yml up -d     # PostgreSQL 16 + 
 ```
 
 ```bash
-cd backend && mvn spring-boot:run        # default profile: Flyway migrates the schema
+cd backend
+export JWT_SECRET="$(openssl rand -base64 48)"   # required: there is no built-in default
+mvn spring-boot:run                              # Flyway migrates the schema, ddl-auto=validate
+```
+
+```bash
 cd frontend && npm install && npm run dev
 ```
+
+The database starts empty and the app refuses to invent an operator for it. To get a usable account,
+pick one of:
+
+```bash
+# Development fixtures: a fabricated estate you can click through
+DEMO_DATA_ENABLED=true mvn spring-boot:run
+
+# Or a single admin account and nothing else (the production path)
+BOOTSTRAP_ADMIN_ENABLED=true BOOTSTRAP_ADMIN_EMAIL=you@example.com \
+  BOOTSTRAP_ADMIN_PASSWORD='at-least-8-chars' mvn spring-boot:run
+```
+
+See [.env.example](.env.example) for the full list of variables.
 
 ### Option C — everything in containers
 
@@ -142,8 +163,9 @@ This is the story the product tells, and each step hits a real endpoint.
    `core-router-eu-1`, plus a second application.
 2. **Network paths** — filter by status. The seeded estate intentionally contains all four states.
 3. **Open `eu-west-to-ap-south-primary`** — the centrepiece. It is `DEGRADED`: average latency
-   `253 ms` and packet loss `2.71 %`. The *Health analysis* panel explains exactly which threshold
-   was crossed, using the thresholds fetched from `GET /api/config/path-health`.
+   `196 ms` and packet loss `2.13 %`. The *Health analysis* panel explains exactly which threshold
+   was crossed, using the thresholds fetched from `GET /api/config/path-health` — including the
+   telemetry window, and the fact that the 18 retained samples narrow to 9 inside that window.
 4. **Submit telemetry** — with the *Degradation preset* (`latency 250 ms`, `packet loss 8 %`) or with
    your own numbers, then press **Submit sample**. The response reports the new state and sample
    count, the metric grid and timelines update, and the recommendation is refetched.
@@ -267,7 +289,9 @@ netpath/
 ├── frontend/                   React console
 │   └── src/{api,auth,components,lib,pages}/
 ├── infrastructure/             Compose files, Dockerfiles, nginx config
-├── docs/                       architecture, API, algorithm
+├── docs/                       workflow, page guide, cheat sheet, architecture, API, algorithm
+├── render.yaml                 Render Blueprint (not applied)
+├── .env.example                Environment variable template
 └── .github/workflows/ci.yml
 ```
 
@@ -281,10 +305,73 @@ netpath/
 | `app.path-health.thresholds.down-latency-ms` | `500` | Worst sample at or above which a path is `DOWN` |
 | `app.path-health.thresholds.degraded-packet-loss-pct` | `0.5` | Average loss at or above which a path is `DEGRADED` |
 | `app.path-health.thresholds.down-packet-loss-pct` | `10.0` | Worst loss at or above which a path is `DOWN` |
-| `app.path-health.thresholds.min-metrics-for-evaluation` | `3` | Samples required before classifying (`UNKNOWN` below this) |
+| `app.path-health.window-minutes` | `60` | How far back *current* health looks; older telemetry is retained for history but does not classify |
+| `app.path-health.thresholds.min-metrics-for-evaluation` | `3` | Samples required in the window before classifying (`UNKNOWN` below this) |
 | `app.path-health.cache.ttl-seconds` | `120` | Redis hot-state TTL |
-| `app.security.jwt.secret` | dev value | HS256 signing key — override per environment |
-| `app.demo-data.enabled` | `true` | Seed the demo network when the database has no users |
+| `app.security.jwt.secret` | *none* | HS256 signing key, at least 32 characters. The application refuses to start without it; only the `dev` profile has a development-only value |
+| `app.security.cors.allowed-origins` | `http://localhost:5173` | Comma-separated browser origins allowed to call the API |
+| `app.demo-data.enabled` | `false` | Seed a fabricated estate when the database has no users. `dev` profile opt-in only |
+| `app.bootstrap-admin.enabled` | `false` | Create the first operator on an empty database, then set this back to `false` |
+
+### Environment variables
+
+Every environment-specific value is read from the environment; nothing secret is committed. Full
+template in [.env.example](.env.example).
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DB_HOST` `DB_PORT` `DB_NAME` `DB_USERNAME` `DB_PASSWORD` | `localhost` `5432` `netpath` `netpath` `netpath` | PostgreSQL connection |
+| `REDIS_HOST` `REDIS_PORT` | `localhost` `6379` | Redis connection; absent Redis degrades to recomputation |
+| `JWT_SECRET` | *none* | Signing key. No fallback outside the `dev` profile |
+| `JWT_EXPIRATION_MS` | `86400000` | Token lifetime |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated allowed browser origins |
+| `SERVER_PORT` / `PORT` | `8080` | Bind port. `SERVER_PORT` wins when set, then the `PORT` some hosts inject |
+| `BOOTSTRAP_ADMIN_ENABLED` `BOOTSTRAP_ADMIN_EMAIL` `BOOTSTRAP_ADMIN_PASSWORD` | `false` | First-operator provisioning |
+| `DEMO_DATA_ENABLED` | `false` | Development fixtures. Never enable in production |
+| `VITE_API_BASE_URL` | `/api` | Frontend build-time API root, *including* the `/api` segment |
+
+---
+
+## Deployment
+
+`render.yaml` describes the whole stack as a Render Blueprint. **It has not been applied**: no
+deployment has been performed or verified from this repository, and the steps below are the intended
+path rather than a record of one.
+
+```text
+GitHub (main)
+      ↓
+Render
+      ├── netpath-console   React static site   →  VITE_API_BASE_URL baked in at build time
+      ├── netpath-api       Spring Boot (Docker) →  Flyway migrates on boot, health check /api/health
+      ├── netpath-db        PostgreSQL           source of truth
+      └── netpath-cache     Render Key Value     private network, ipAllowList: []
+```
+
+Before the first deploy:
+
+1. Set `VITE_API_BASE_URL` on the static site to the API root **including** `/api`, for example
+   `https://netpath-api.onrender.com/api`. Never a `localhost` value.
+2. Let Render generate `JWT_SECRET` (the app will not start without it).
+3. Set `CORS_ALLOWED_ORIGINS` to the static site's origin, for example
+   `https://netpath-console.onrender.com`.
+4. For the first boot only, set `BOOTSTRAP_ADMIN_ENABLED=true` with `BOOTSTRAP_ADMIN_EMAIL` and
+   `BOOTSTRAP_ADMIN_PASSWORD`, confirm you can sign in, then set the flag back to `false`.
+
+Leave `DEMO_DATA_ENABLED=false`: the production database should receive real data through the API.
+
+---
+
+## Documentation
+
+| Document | Contents |
+| --- | --- |
+| [docs/system-workflow.md](docs/system-workflow.md) | The full request path, telemetry ingestion, health classification, caching, recommendation, simulated shifting, failure behaviour and boot order |
+| [docs/page-guide.md](docs/page-guide.md) | Every console page: purpose, API used, data source, user actions |
+| [docs/interview-cheat-sheet.md](docs/interview-cheat-sheet.md) | Architecture and design decisions, each technology's reason, the schema-drift bug, trade-offs and limits |
+| [docs/architecture.md](docs/architecture.md) | Components, ownership rules, request flows |
+| [docs/api.md](docs/api.md) | Endpoint reference and error contract |
+| [docs/route-recommendation.md](docs/route-recommendation.md) | Candidate selection and ranking |
 
 ---
 
@@ -292,9 +379,10 @@ netpath/
 
 Stated plainly so nothing here is mistaken for functionality that does not exist:
 
-- **Classification is over all retained telemetry**, not a rolling window. A path with a long healthy
-  history resists a single bad sample, which is realistic but means operators should submit a few
-  samples to see a transition. A windowed evaluation is the next improvement (see below).
+- **Classification uses a fixed window, not percentiles.** Current health aggregates the last
+  `app.path-health.window-minutes` (default 60) by average and maximum. Percentiles (p95/p99) or
+  per-hop attribution would describe tail latency better; a windowed average and max were chosen as
+  the simplest rule an operator can read off the screen.
 - **There is no metric retention or downsampling job.** `path_metrics` grows without bound; a
   scheduled rollup into hourly buckets belongs here before any long-running deployment.
 - **Traffic shifts are recorded, not applied.** No router, SDN controller or cloud API is contacted,

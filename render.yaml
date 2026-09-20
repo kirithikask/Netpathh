@@ -1,0 +1,107 @@
+# Render Blueprint for NETPATH.
+#
+# Applying this file creates four resources:
+#   netpath-api      Spring Boot web service, built from infrastructure/Dockerfile.backend
+#   netpath-console  React static site
+#   netpath-db       Render Postgres - the source of truth, migrated by Flyway on every boot
+#   netpath-cache    Render Key Value - the Redis-compatible hot-state cache
+#
+# This file has not been applied. Validate it with `render blueprint validate` (Render CLI v2.7.0+)
+# before syncing. Values marked `sync: false` are absent on purpose: set them in the dashboard on the
+# first deploy.
+services:
+  - type: web
+    name: netpath-api
+    runtime: docker
+    dockerfilePath: ./infrastructure/Dockerfile.backend
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    envVars:
+      # Flyway migrates the database on boot; nothing else owns the schema.
+      - key: DB_HOST
+        fromDatabase:
+          name: netpath-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: netpath-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: netpath-db
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: netpath-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: netpath-db
+          property: password
+
+      # Private-network Key Value. ipAllowList is empty, so it is not reachable from the internet.
+      - key: REDIS_HOST
+        fromService:
+          type: keyvalue
+          name: netpath-cache
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: keyvalue
+          name: netpath-cache
+          property: port
+
+      # Generated once and stored by Render. No default exists in the application, so a deploy
+      # without this value fails at startup rather than shipping a known signing key.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # The static site's onrender.com origin. Replace with the custom domain after adding one.
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+      # Left off deliberately: this database is production, so it receives real data through the API.
+      - key: DEMO_DATA_ENABLED
+        value: 'false'
+      # Flip to true for the first deploy only, with the two credentials below set, to create the
+      # first operator on an empty database. Then set it back to false.
+      - key: BOOTSTRAP_ADMIN_ENABLED
+        value: 'false'
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+
+  - type: web
+    name: netpath-console
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    autoDeployTrigger: checksPass
+    envVars:
+      # Baked in at build time and must include the /api segment, for example
+      # https://netpath-api.onrender.com/api. Leave localhost out of it.
+      - key: VITE_API_BASE_URL
+        sync: false
+    routes:
+      # Single-page app: every unknown path must serve the shell so client-side routing works.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # Redis-compatible cache. Internal-only: the empty allow list blocks public access, and the
+  # backend reaches it over Render's private network.
+  - type: keyvalue
+    name: netpath-cache
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  - name: netpath-db
+    databaseName: netpath
+    user: netpath
+    plan: free
+    postgresMajorVersion: '16'
