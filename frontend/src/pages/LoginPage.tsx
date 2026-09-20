@@ -3,12 +3,20 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { describeError } from '../api/client';
 
+/**
+ * Convenience prefill for local development only. A production build ships an empty form and no
+ * hint, so no development password is baked into the deployed bundle.
+ */
+const DEMO_EMAIL = 'operator@netpath.io';
+const DEMO_PASSWORD = 'netpath123';
+const SHOW_DEMO_CREDENTIALS = import.meta.env.DEV;
+
 export function LoginPage() {
   const { isAuthenticated, signIn } = useAuth();
   const location = useLocation();
 
-  const [email, setEmail] = useState('operator@netpath.io');
-  const [password, setPassword] = useState('netpath123');
+  const [email, setEmail] = useState(SHOW_DEMO_CREDENTIALS ? DEMO_EMAIL : '');
+  const [password, setPassword] = useState(SHOW_DEMO_CREDENTIALS ? DEMO_PASSWORD : '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -93,11 +101,13 @@ reason: status improvement: DEGRADED → HEALTHY`}</pre>
           {busy ? 'Authenticating…' : 'Sign in'}
         </button>
 
-        <p className="tiny faint" style={{ margin: 0 }}>
-          Demo credentials come from the seeded operator account
-          (<span className="mono">app.demo-data.email</span> /{' '}
-          <span className="mono">app.demo-data.password</span>).
-        </p>
+        {SHOW_DEMO_CREDENTIALS && (
+          <p className="tiny faint" style={{ margin: 0 }}>
+            Development build: the field is prefilled from the seeded operator account
+            (<span className="mono">app.demo-data.email</span> /{' '}
+            <span className="mono">app.demo-data.password</span>).
+          </p>
+        )}
       </form>
     </div>
   );

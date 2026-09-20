@@ -22,8 +22,15 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
 }
 
+/**
+ * Where the API lives. Locally the Vite dev server proxies `/api` to the backend on port 8080, so
+ * the relative default works. A deployed build sets VITE_API_BASE_URL to the full API root,
+ * including the `/api` segment - for example https://netpath-api.onrender.com/api.
+ */
+const baseURL = import.meta.env.VITE_API_BASE_URL || '/api';
+
 export const api = axios.create({
-  baseURL: '/api',
+  baseURL,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -53,7 +60,7 @@ export function describeError(error: unknown): string {
       return error.response.data.message;
     }
     if (error.code === 'ERR_NETWORK') {
-      return 'Cannot reach the NETPATH API. Is the backend running on port 8080?';
+      return `Cannot reach the NETPATH API at ${baseURL}.`;
     }
     return error.message;
   }
