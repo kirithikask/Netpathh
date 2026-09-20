@@ -38,6 +38,13 @@ services:
       SPRING_DATASOURCE_USERNAME: netpath
       SPRING_DATASOURCE_PASSWORD: netpath
       SPRING_DATA_REDIS_HOST: redis
+      # There is no built-in signing key, so the container refuses to boot without one. This value is
+      # a local-demo secret and is safe to publish; a real deployment supplies its own via a secret.
+      JWT_SECRET: local-compose-demo-signing-key-not-for-production-use
+      # This stack is a demonstration of the whole system, so it seeds the fabricated estate. The
+      # default is off precisely so that nothing but an explicit opt-in seeds a real database.
+      DEMO_DATA_ENABLED: 'true'
+      CORS_ALLOWED_ORIGINS: http://localhost:8081
     depends_on:
       postgres:
         condition: service_healthy
