@@ -24,6 +24,15 @@ public class JwtUtils {
     public JwtUtils(
             @Value("${app.security.jwt.secret}") String secret,
             @Value("${app.security.jwt.expiration-ms}") long expirationMs) {
+        // Fail at startup rather than signing tokens with a missing or guessable key. HMAC-SHA256
+        // signing needs at least 256 bits of key material, which Keys rejects below 32 bytes.
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "app.security.jwt.secret is not set. Set JWT_SECRET to a random value of at "
+                            + "least 32 characters before starting NETPATH. The 'dev' profile has its "
+                            + "own development-only key; nothing else gets a fallback.");
+        }
+
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMs = expirationMs;
     }

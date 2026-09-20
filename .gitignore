@@ -7,6 +7,16 @@ frontend/node_modules/
 # Local demo database (created by the `dev` profile)
 backend/data/
 
+# Real environment values. Only the placeholder template is committed.
+.env
+.env.*
+!.env.example
+
+# TLS material and local keystores
+*.pem
+*.p12
+*.jks
+
 # IDE
 .idea/
 *.iml
