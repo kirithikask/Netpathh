@@ -1,0 +1,20 @@
+# Build stage: resolve dependencies and produce the jar.
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /workspace
+
+COPY backend/pom.xml .
+RUN mvn -B -q dependency:go-offline
+
+COPY backend/src ./src
+RUN mvn -B -DskipTests package
+
+# Runtime stage: JRE only, non-root user.
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+
+RUN addgroup -S netpath && adduser -S netpath -G netpath
+COPY --from=build /workspace/target/backend-*.jar app.jar
+USER netpath
+
+EXPOSE 8080
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app/app.jar"]

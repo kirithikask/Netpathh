@@ -1,0 +1,38 @@
+# Infrastructure dependencies for local development.
+#
+#   docker compose -f infrastructure/docker-compose.yml up -d
+#
+# Then run the backend with the default profile (it targets PostgreSQL on 5432 and Redis on 6379)
+# and the frontend with `npm run dev`.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netpath-postgres
+    environment:
+      POSTGRES_DB: netpath
+      POSTGRES_USER: netpath
+      POSTGRES_PASSWORD: netpath
+    ports:
+      - '5432:5432'
+    volumes:
+      - netpath-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U netpath -d netpath']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: netpath-redis
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  netpath-postgres-data:

@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # The suite runs on an embedded H2 database with a stubbed Redis, so no services are needed.
+      - name: Run tests
+        working-directory: backend
+        run: mvn -B verify
+
+      - name: Publish test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: backend/target/surefire-reports/
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # `npm run build` runs tsc first, so type errors fail the pipeline.
+      - name: Type-check and build
+        working-directory: frontend
+        run: npm run build
+
+  docker:
+    name: Container validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Catches compose errors without paying for a full image build on every push.
+      - name: Validate compose files
+        run: |
+          docker compose -f infrastructure/docker-compose.yml config --quiet
+          docker compose -f infrastructure/docker-compose.full.yml config --quiet
+
+      - name: Build application images
+        run: docker compose -f infrastructure/docker-compose.full.yml build backend frontend

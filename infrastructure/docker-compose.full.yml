@@ -1,0 +1,65 @@
+# Fully containerised stack: React behind nginx, Spring Boot, PostgreSQL, Redis.
+#
+#   docker compose -f infrastructure/docker-compose.full.yml up --build
+#   open http://localhost:8081
+#
+# The browser talks to nginx, which reverse-proxies /api to the backend, so the frontend image has
+# no build-time knowledge of the API host.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: netpath
+      POSTGRES_USER: netpath
+      POSTGRES_PASSWORD: netpath
+    volumes:
+      - netpath-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U netpath -d netpath']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infrastructure/Dockerfile.backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/netpath
+      SPRING_DATASOURCE_USERNAME: netpath
+      SPRING_DATASOURCE_PASSWORD: netpath
+      SPRING_DATA_REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - '8080:8080'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:8080/actuator/health']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: infrastructure/Dockerfile.frontend
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - '8081:80'
+
+volumes:
+  netpath-postgres-data:
