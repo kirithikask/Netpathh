@@ -6,7 +6,7 @@ NETPATH monitors network paths, ingests per-path telemetry, classifies path heal
 configurable thresholds, keeps current state in Redis, retains history in PostgreSQL, and recommends
 a healthier alternative route when a path degrades.
 
-![status](https://img.shields.io/badge/tests-38%20passing-brightgreen)
+[![CI](https://github.com/kirithikask/Netpathh/actions/workflows/ci.yml/badge.svg)](https://github.com/kirithikask/Netpathh/actions/workflows/ci.yml)
 
 ---
 
@@ -72,7 +72,7 @@ GET /api/paths/{id}/health
 | Security | JWT authentication, stateless sessions, public health and OpenAPI endpoints only |
 | Observability | Spring Boot Actuator (`health`, `info`, `metrics`) and an API root health endpoint |
 | API docs | OpenAPI 3 via springdoc: `/swagger-ui.html`, `/v3/api-docs` |
-| Tests | 38 tests: pure health classification, cache behaviour, recommendation ranking, shift validation, and an end-to-end REST integration suite |
+| Tests | Unit, HTTP-integration, container-backed (real PostgreSQL + Redis via Testcontainers) and cache-outage suites |
 
 ## Tech stack
 
@@ -218,17 +218,23 @@ Full request/response shapes and examples: [docs/api.md](docs/api.md).
 cd backend && mvn test
 ```
 
-38 tests, runnable with no external services. Classification is pure, so its tests need no mocks;
-the integration suite boots the real Spring context against H2 and stubs Redis with an in-memory
-stand-in, then walks the demo flow through `MockMvc`:
+Seven suites. Classification is pure, so its tests need no mocks; the HTTP-integration suite boots
+the real Spring context against H2 and stubs Redis with an in-memory stand-in, then walks the demo
+flow through `MockMvc`:
 
 ```
-PathHealthServiceTest         10  every classification branch and boundary, no mocks at all
-PathHealthCacheServiceTest     6  hit, miss rebuild, Redis-down fallback, invalidation, no domain writes
-RouteRecommendationServiceTest 5  status/latency ranking, no-alternative, unknown path
-TrafficShiftServiceTest        5  same-endpoint validation, self-shift rejection, persistence
-NetpathApiIntegrationTest     12  auth, telemetry, history filters, recommendation, shift, errors
+PathHealthServiceTest             every classification branch, threshold boundary and window rule, no mocks at all
+PathHealthCacheServiceTest        hit, miss rebuild, Redis-down fallback, invalidation, no domain writes
+RouteRecommendationServiceTest    status/latency/loss ranking, no-alternative cases, read-only proof
+TrafficShiftServiceTest           same-endpoint validation, self-shift rejection, persistence
+NetpathApiIntegrationTest         auth, telemetry, window edges, recommendation, shift, errors, cascades
+RedisOutageIntegrationTest        the whole read/write surface with Redis unreachable
+NetpathContainerIntegrationTest   the same flows against real PostgreSQL and Redis containers
 ```
+
+The container suite needs Docker and is skipped automatically where Docker is absent (CI runners
+have it, so it executes on every push there). `mvn test` prints the current totals in its surefire
+summary.
 
 ```bash
 cd frontend && npm run build     # tsc --noEmit equivalent, then vite build

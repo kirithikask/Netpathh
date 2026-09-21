@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Every push - not only main - so feature branches get the same build, tests and image builds
+  # before a PR even exists. Pull requests are covered by the trigger below.
   push:
-    branches: [main, master]
   pull_request:
 
 concurrency:
