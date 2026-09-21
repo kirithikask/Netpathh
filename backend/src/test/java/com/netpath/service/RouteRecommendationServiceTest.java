@@ -148,6 +148,86 @@ class RouteRecommendationServiceTest {
         assertThat(recommendation.getRecommendedPathId()).isEqualTo(WORSE_ALT_ID);
     }
 
+    /**
+     * Equal status is not a tie that blocks the recommendation: among siblings of the same rank,
+     * lower average latency wins, so a DEGRADED current path can be moved to a DEGRADED sibling
+     * that is measurably faster.
+     */
+    @Test
+    void recommendsAnEqualStatusAlternativeWithLowerLatency() {
+        Endpoint source = endpoint(10L, "edge-a", "10.0.0.1");
+        Endpoint destination = endpoint(20L, "edge-b", "10.0.0.2");
+
+        NetworkPath current = path(CURRENT_PATH_ID, "primary", source, destination);
+        NetworkPath fasterDegraded = path(HEALTHY_ALT_ID, "faster-degraded", source, destination);
+
+        when(networkPathRepository.findByIdWithDetails(CURRENT_PATH_ID)).thenReturn(Optional.of(current));
+        when(networkPathRepository.findAlternativePaths(10L, 20L, CURRENT_PATH_ID))
+                .thenReturn(List.of(fasterDegraded));
+
+        telemetryFor(CURRENT_PATH_ID, 10, 300.0, 5.0);
+        telemetryFor(HEALTHY_ALT_ID, 10, 150.0, 1.0);
+
+        RouteRecommendationDto recommendation = service.generateRecommendation(CURRENT_PATH_ID);
+
+        assertThat(recommendation.getHasAlternative()).isTrue();
+        assertThat(recommendation.getRecommendedPathId()).isEqualTo(HEALTHY_ALT_ID);
+        assertThat(recommendation.getRecommendedStatus()).isEqualTo(PathStatus.DEGRADED.name());
+        assertThat(recommendation.getReason()).contains("Latency");
+    }
+
+    /**
+     * "Measurably better" means better in some dimension: an identical sibling must not be
+     * recommended, or every poll would point the operator sideways at no gain.
+     */
+    @Test
+    void keepsTheCurrentPathWhenLatencyAndLossAreEqual() {
+        Endpoint source = endpoint(10L, "edge-a", "10.0.0.1");
+        Endpoint destination = endpoint(20L, "edge-b", "10.0.0.2");
+
+        NetworkPath current = path(CURRENT_PATH_ID, "primary", source, destination);
+        NetworkPath twin = path(HEALTHY_ALT_ID, "twin", source, destination);
+
+        when(networkPathRepository.findByIdWithDetails(CURRENT_PATH_ID)).thenReturn(Optional.of(current));
+        when(networkPathRepository.findAlternativePaths(10L, 20L, CURRENT_PATH_ID))
+                .thenReturn(List.of(twin));
+
+        telemetryFor(CURRENT_PATH_ID, 10, 300.0, 5.0);
+        telemetryFor(HEALTHY_ALT_ID, 10, 300.0, 5.0);
+
+        RouteRecommendationDto recommendation = service.generateRecommendation(CURRENT_PATH_ID);
+
+        assertThat(recommendation.getHasAlternative()).isFalse();
+        assertThat(recommendation.getRecommendedPathId()).isNull();
+        assertThat(recommendation.getReason()).contains("No alternative path is currently healthier");
+    }
+
+    /**
+     * Latency ties break on packet loss - the third documented dimension of the ranking rule
+     * (status, then average latency, then packet loss).
+     */
+    @Test
+    void breaksALatencyTieOnPacketLoss() {
+        Endpoint source = endpoint(10L, "edge-a", "10.0.0.1");
+        Endpoint destination = endpoint(20L, "edge-b", "10.0.0.2");
+
+        NetworkPath current = path(CURRENT_PATH_ID, "primary", source, destination);
+        NetworkPath cleaner = path(HEALTHY_ALT_ID, "cleaner", source, destination);
+
+        when(networkPathRepository.findByIdWithDetails(CURRENT_PATH_ID)).thenReturn(Optional.of(current));
+        when(networkPathRepository.findAlternativePaths(10L, 20L, CURRENT_PATH_ID))
+                .thenReturn(List.of(cleaner));
+
+        telemetryFor(CURRENT_PATH_ID, 10, 150.0, 2.0);
+        telemetryFor(HEALTHY_ALT_ID, 10, 150.0, 0.3);
+
+        RouteRecommendationDto recommendation = service.generateRecommendation(CURRENT_PATH_ID);
+
+        assertThat(recommendation.getHasAlternative()).isTrue();
+        assertThat(recommendation.getRecommendedPathId()).isEqualTo(HEALTHY_ALT_ID);
+        assertThat(recommendation.getReason()).contains("Packet loss");
+    }
+
     @Test
     void reportsNoAlternativeWhenEveryCandidateIsWorse() {
         Endpoint source = endpoint(10L, null, null);
