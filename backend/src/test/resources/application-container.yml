@@ -1,0 +1,17 @@
+# Overlays the base configuration for the container-backed suite. Datasource and Redis connection
+# details are contributed by @ServiceConnection at runtime, so they are deliberately absent here.
+spring:
+  jpa:
+    hibernate:
+      # The schema is whatever Flyway builds on the real PostgreSQL container; validate proves the
+      # entities agree with it on every CI run.
+      ddl-auto: validate
+
+app:
+  demo-data:
+    enabled: false
+  security:
+    jwt:
+      # 256-bit minimum; JwtUtils refuses shorter keys at startup.
+      secret: container-test-jwt-secret-0123456789abcdef
+      expiration-ms: 86400000

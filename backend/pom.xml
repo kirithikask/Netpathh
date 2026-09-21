@@ -116,6 +116,28 @@
         </dependency>
 
         <!--
+             The container-backed suite runs the application against real PostgreSQL and Redis so
+             migrations, aggregate SQL and cache serialization are exercised, not approximated.
+             Versions are managed by the Spring Boot BOM. Tests declare @Testcontainers(disabledWithoutDocker)
+             so environments without Docker skip them instead of failing.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
              H2 backs the `dev` profile and the test suite so the application can be run and
              verified without PostgreSQL. The default profile targets PostgreSQL via Flyway.
         -->
