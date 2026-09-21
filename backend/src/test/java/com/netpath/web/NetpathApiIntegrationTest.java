@@ -141,8 +141,13 @@ class NetpathApiIntegrationTest {
      * current instant, which is exactly the state these window tests need to step outside of.
      */
     private void storeMetricsAgedBy(Long pathId, int samples, int hoursAgo, int latencyMs, String packetLoss) {
+        storeMetricsAgedByMinutes(pathId, samples, hoursAgo * 60, latencyMs, packetLoss);
+    }
+
+    private void storeMetricsAgedByMinutes(Long pathId, int samples, int minutesAgo,
+                                           int latencyMs, String packetLoss) {
         NetworkPath path = networkPathRepository.findById(pathId).orElseThrow();
-        Instant start = Instant.now().minus(hoursAgo, ChronoUnit.HOURS);
+        Instant start = Instant.now().minus(minutesAgo, ChronoUnit.MINUTES);
 
         for (int i = 0; i < samples; i++) {
             PathMetric metric = new PathMetric(
@@ -150,6 +155,16 @@ class NetpathApiIntegrationTest {
             metric.setTimestamp(start.plus(i, ChronoUnit.MINUTES));
             pathMetricRepository.save(metric);
         }
+    }
+
+    /** One sample stamped at exactly {@code minutesAgo} - the unit the window edge is stated in. */
+    private void storeMetricAgedExactlyByMinutes(Long pathId, int minutesAgo,
+                                                 int latencyMs, String packetLoss) {
+        NetworkPath path = networkPathRepository.findById(pathId).orElseThrow();
+        PathMetric metric = new PathMetric(
+                path, latencyMs, new BigDecimal(packetLoss), new BigDecimal("500.00"));
+        metric.setTimestamp(Instant.now().minus(minutesAgo, ChronoUnit.MINUTES));
+        pathMetricRepository.save(metric);
     }
 
     private void sendMetric(Long pathId, int latencyMs, String packetLoss) throws Exception {
@@ -242,6 +257,47 @@ class NetpathApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("HEALTHY"))
                 .andExpect(jsonPath("$.metricsCount").value(3));
+    }
+
+    /**
+     * The window edge, in both directions, without sleeping: three samples 59 minutes old still
+     * decide the verdict (DOWN, and exactly 3 in-window samples), while the sibling sample 61
+     * minutes old is excluded from the aggregate. If the window edge were exclusive or drifted,
+     * the counts and the verdict would both move.
+     */
+    @Test
+    void samplesJustInsideTheWindowDecideAndTheOneJustOutsideIsExcluded() throws Exception {
+        Long edgeId = pathIdNamed("backup-link");
+
+        // Three samples 57-59 minutes old: all inside the window, so the path is DOWN with exactly
+        // three samples counted. A 61-minute-old sample carries the same severe reading but must be
+        // excluded - if it were aggregated the count would read four.
+        storeMetricAgedExactlyByMinutes(edgeId, 57, 950, "12.00");
+        storeMetricAgedExactlyByMinutes(edgeId, 59, 950, "12.00");
+        storeMetricAgedExactlyByMinutes(edgeId, 59, 950, "12.00");
+        storeMetricAgedExactlyByMinutes(edgeId, 61, 950, "12.00");
+
+        mockMvc.perform(get("/api/paths/{id}/health", edgeId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DOWN"))
+                .andExpect(jsonPath("$.metricsCount").value(3));
+    }
+
+    /** The counterpart: one minute past the window, the same severe samples stop deciding. */
+    @Test
+    void samplesJustOutsideTheWindowLeaveThePathUnknown() throws Exception {
+        Long edgeId = pathIdNamed("backup-link");
+
+        storeMetricAgedExactlyByMinutes(edgeId, 61, 950, "12.00");
+        storeMetricAgedExactlyByMinutes(edgeId, 62, 950, "12.00");
+        storeMetricAgedExactlyByMinutes(edgeId, 63, 950, "12.00");
+
+        mockMvc.perform(get("/api/paths/{id}/health", edgeId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.metricsCount").value(0));
     }
 
     @Test
