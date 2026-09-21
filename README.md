@@ -236,6 +236,14 @@ The container suite needs Docker and is skipped automatically where Docker is ab
 have it, so it executes on every push there). `mvn test` prints the current totals in its surefire
 summary.
 
+On Windows with Docker Desktop, Testcontainers is run from a shell that may not carry the engine
+endpoint Docker Desktop configures for the CLI. Point it at the engine explicitly if the suite
+skips despite a running engine:
+
+```bash
+export DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
+```
+
 ```bash
 cd frontend && npm run build     # tsc --noEmit equivalent, then vite build
 ```

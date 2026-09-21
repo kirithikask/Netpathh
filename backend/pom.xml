@@ -20,6 +20,12 @@
     <properties>
         <java.version>21</java.version>
         <jjwt.version>0.12.5</jjwt.version>
+        <!--
+             Spring Boot 3.3's BOM pins Testcontainers 1.19.8, whose docker-java negotiates an engine
+             API version that current Docker engines reject with HTTP 400. Staying on the 1.x line
+             keeps the API compatible while picking up the fixed client.
+        -->
+        <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
     <dependencies>
